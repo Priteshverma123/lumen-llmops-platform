@@ -1,0 +1,14 @@
+<clickhouse>
+    <!-- UTC only: mixed time zones silently shift rollups -->
+    <timezone>UTC</timezone>
+    <!-- system logs grow without bound otherwise (a common self-hosting disk incident) -->
+    <query_log replace="1">
+        <database>system</database><table>query_log</table>
+        <engine>ENGINE = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + INTERVAL 7 DAY</engine>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </query_log>
+    <trace_log remove="1"/>
+    <text_log remove="1"/>
+    <metric_log remove="1"/>
+    <asynchronous_metric_log remove="1"/>
+</clickhouse>

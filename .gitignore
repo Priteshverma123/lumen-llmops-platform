@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+bench/results/
+*.log
+.env.*
+!.env.example
+node_modules/

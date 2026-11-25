@@ -1,0 +1,167 @@
+{
+  "uid": "lumen-cost",
+  "title": "Lumen: cost attribution",
+  "tags": [
+    "lumen",
+    "llm"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Spend per hour by route",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "lumen-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "lumen-clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT toStartOfHour(minute) AS time, route, sum(cost_usd) AS usd FROM llm_minute WHERE project_id = '${project}' AND $__timeFilter(minute)\n        GROUP BY time, route ORDER BY time",
+          "format": 0,
+          "queryType": "timeseries"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Spend by tenant (range)",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "lumen-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "lumen-clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT tenant, sum(cost_usd) AS usd, sum(calls) AS calls,\n        sum(cost_usd)/sum(calls) AS usd_per_call FROM llm_minute WHERE project_id = '${project}' AND $__timeFilter(minute) GROUP BY tenant ORDER BY usd DESC LIMIT 50",
+          "format": 1,
+          "queryType": "table"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Spend by model (range)",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "lumen-clickhouse"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "lumen-clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT provider, model, sum(cost_usd) AS usd, sum(input_tokens) AS input,\n        sum(output_tokens) AS output FROM llm_minute WHERE project_id = '${project}' AND $__timeFilter(minute) GROUP BY provider, model ORDER BY usd DESC",
+          "format": 1,
+          "queryType": "table"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Cost per call by prompt version",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "lumen-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "lumen-clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT minute AS time, concat(prompt_name,'@v',\n        toString(prompt_version)) AS prompt, sum(cost_usd)/sum(calls) AS usd_per_call FROM llm_minute WHERE project_id = '${project}' AND $__timeFilter(minute) AND prompt_name != ''\n        GROUP BY time, prompt ORDER BY time",
+          "format": 0,
+          "queryType": "timeseries"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "project",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "lumen-clickhouse"
+        },
+        "query": "SELECT DISTINCT project_id FROM llm_hour",
+        "refresh": 2
+      }
+    ]
+  }
+}

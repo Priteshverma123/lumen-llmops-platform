@@ -1,0 +1,13 @@
+apiVersion: 1
+datasources:
+  - name: Lumen ClickHouse
+    uid: lumen-clickhouse
+    type: grafana-clickhouse-datasource
+    jsonData:
+      host: clickhouse
+      port: 9000
+      protocol: native
+      username: grafana
+      defaultDatabase: lumen
+    secureJsonData:
+      password: grafana-readonly

@@ -1,0 +1,167 @@
+{
+  "uid": "lumen-quality",
+  "title": "Lumen: quality & evals",
+  "tags": [
+    "lumen",
+    "llm"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Online groundedness (hourly mean)",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "lumen-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "lumen-clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT toStartOfHour(created_at) AS time, avg(value) AS\n        groundedness FROM scores WHERE project_id = '${project}' AND name = 'groundedness' AND $__timeFilter(created_at)\n        GROUP BY time ORDER BY time",
+          "format": 0,
+          "queryType": "timeseries"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "User feedback (share positive)",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "lumen-clickhouse"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "lumen-clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT toStartOfHour(created_at) AS time, avg(value) AS positive\n        FROM scores WHERE project_id = '${project}' AND name = 'feedback' AND $__timeFilter(created_at) GROUP BY time ORDER BY time",
+          "format": 0,
+          "queryType": "timeseries"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Refusal / PII / truncation rates",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "lumen-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "lumen-clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT toStartOfHour(created_at) AS time,\n        avgIf(value, name='refusal') AS refusal, avgIf(value, name='pii_leak') AS pii, avgIf(value, name='truncated')\n        AS truncated FROM scores WHERE project_id = '${project}' AND source = 'eval' AND $__timeFilter(created_at) GROUP BY time\n        ORDER BY time",
+          "format": 0,
+          "queryType": "timeseries"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Groundedness by prompt version",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "lumen-clickhouse"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "lumen-clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT concat(s.prompt_name,'@v',toString(s.prompt_version)) AS\n        prompt, avg(sc.value) AS groundedness, count() AS n FROM scores AS sc INNER JOIN (SELECT DISTINCT trace_id,\n        prompt_name, prompt_version FROM spans WHERE project_id = '${project}' AND $__timeFilter(start_time) AND prompt_name != '') AS s\n        ON s.trace_id = sc.trace_id WHERE sc.name = 'groundedness' GROUP BY prompt ORDER BY prompt",
+          "format": 1,
+          "queryType": "table"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "project",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "lumen-clickhouse"
+        },
+        "query": "SELECT DISTINCT project_id FROM llm_hour",
+        "refresh": 2
+      }
+    ]
+  }
+}

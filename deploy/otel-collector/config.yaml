@@ -1,0 +1,40 @@
+# OTel Collector in front of Lumen: apps export OTLP here; the collector tail-samples and redacts,
+# then forwards OTLP/HTTP to Lumen's ingest API.
+receivers:
+  otlp:
+    protocols:
+      grpc: {endpoint: 0.0.0.0:4317}
+      http: {endpoint: 0.0.0.0:4318}
+
+processors:
+  memory_limiter: {check_interval: 1s, limit_mib: 512, spike_limit_mib: 128}
+  # keep 100% of errors and slow traces, 25% of the rest. Cost/usage metrics should be computed
+  # from unsampled data: export metrics separately or set the probabilistic policy to 100%.
+  tail_sampling:
+    decision_wait: 10s
+    policies:
+      - {name: errors, type: status_code, status_code: {status_codes: [ERROR]}}
+      - {name: slow, type: latency, latency: {threshold_ms: 5000}}
+      - {name: rest, type: probabilistic, probabilistic: {sampling_percentage: 25}}
+  # drop prompt/response bodies unless the producer explicitly opted in upstream
+  attributes/redact:
+    actions:
+      - {key: gen_ai.input.messages, action: delete}
+      - {key: gen_ai.output.messages, action: delete}
+      - {key: gen_ai.system_instructions, action: delete}
+  batch: {send_batch_size: 2000, timeout: 2s}
+
+exporters:
+  otlphttp/lumen:
+    endpoint: http://api:8000
+    headers: {Authorization: "Bearer ${env:LUMEN_INGEST_KEY}"}
+    compression: gzip
+    retry_on_failure: {enabled: true, initial_interval: 1s, max_interval: 30s, max_elapsed_time: 300s}
+    sending_queue: {enabled: true, queue_size: 5000}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, tail_sampling, attributes/redact, batch]
+      exporters: [otlphttp/lumen]

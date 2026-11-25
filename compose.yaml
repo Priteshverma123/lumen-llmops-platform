@@ -1,0 +1,187 @@
+# Lumen local/prod-like stack.  Quickstart:  cp .env.example .env && docker compose up -d --wait
+#
+# Profiles (COMPOSE_PROFILES in .env, comma-separated):
+#   cpu            TEI embedding + rerank servers on CPU          (default)
+#   gpu            TEI on NVIDIA GPUs instead of cpu
+#   observability  OTel Collector (tail sampling) + Grafana dashboards-as-code
+#
+# Infra ports bind to 127.0.0.1 only. Images are pinned; bump deliberately.
+
+x-app: &app
+  build: {context: ., dockerfile: docker/Dockerfile}
+  image: lumen:${LUMEN_IMAGE_TAG:-dev}
+  env_file: .env
+  restart: unless-stopped
+  depends_on:
+    migrate-postgres: {condition: service_completed_successfully}
+    migrate-clickhouse: {condition: service_completed_successfully}
+    redis: {condition: service_healthy}
+    minio: {condition: service_healthy}
+
+services:
+  # ------------------------------------------------------------------ datastores
+  postgres:
+    image: postgres:16.6
+    environment:
+      POSTGRES_USER: lumen
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lumen}
+      POSTGRES_DB: lumen
+    volumes: [pg-data:/var/lib/postgresql/data]
+    ports: ["127.0.0.1:5433:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lumen -d lumen"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7.4.1-alpine
+    # noeviction: Redis holds the ingest stream and job queues; evicting them would lose data.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction"]
+    volumes: [redis-data:/data]
+    ports: ["127.0.0.1:6380:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.3.62.3
+    environment:
+      CLICKHOUSE_USER: lumen
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-lumen}
+      CLICKHOUSE_DB: lumen
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - ch-data:/var/lib/clickhouse
+      - ./deploy/clickhouse/config.d:/etc/clickhouse-server/config.d:ro
+      - ./deploy/clickhouse/users.d:/etc/clickhouse-server/users.d:ro
+    ulimits:
+      nofile: {soft: 262144, hard: 262144}
+    ports: ["127.0.0.1:8123:8123", "127.0.0.1:9000:9000"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${LUMEN_S3_ACCESS_KEY:-lumen}
+      MINIO_ROOT_PASSWORD: ${LUMEN_S3_SECRET_KEY:-lumen-secret}
+    volumes: [minio-data:/data]
+    ports: ["127.0.0.1:9002:9000", "127.0.0.1:9003:9001"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ------------------------------------------------------------------ one-shot migrations
+  migrate-postgres:
+    build: {context: ., dockerfile: docker/Dockerfile}
+    image: lumen:${LUMEN_IMAGE_TAG:-dev}
+    env_file: .env
+    command: ["alembic", "upgrade", "head"]
+    depends_on: {postgres: {condition: service_healthy}}
+    restart: "no"
+
+  migrate-clickhouse:
+    image: lumen:${LUMEN_IMAGE_TAG:-dev}
+    env_file: .env
+    command: ["python", "-m", "lumen.storage.clickhouse"]
+    depends_on:
+      clickhouse: {condition: service_healthy}
+      migrate-postgres: {condition: service_completed_successfully}  # ensures the image is built first
+    restart: "no"
+
+  # ------------------------------------------------------------------ application
+  api:
+    <<: *app
+    ports: ["127.0.0.1:8000:8000"]
+
+  ingest:
+    <<: *app
+    command: ["python", "-m", "lumen.ingest.consumer"]
+    healthcheck: {disable: true}
+    deploy: {replicas: 1}
+
+  worker:
+    <<: *app
+    command: ["arq", "lumen.workers.main.WorkerSettings"]
+    healthcheck: {disable: true}
+
+  embedder:
+    <<: *app
+    command: ["uvicorn", "lumen.embedder.app:app", "--host", "0.0.0.0", "--port", "8080"]
+    ports: ["127.0.0.1:8080:8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # ------------------------------------------------------------------ model servers
+  tei-embed:
+    profiles: ["cpu"]
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    command: ["--model-id", "BAAI/bge-small-en-v1.5", "--max-batch-tokens", "16384", "--max-client-batch-size", "256"]
+    volumes: [hf-cache:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:80/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 60
+      start_period: 60s
+
+  tei-rerank:
+    profiles: ["cpu"]
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    command: ["--model-id", "BAAI/bge-reranker-base"]
+    volumes: [hf-cache:/data]
+
+  tei-embed-gpu:
+    profiles: ["gpu"]
+    image: ghcr.io/huggingface/text-embeddings-inference:1.6
+    command: ["--model-id", "BAAI/bge-small-en-v1.5", "--max-batch-tokens", "32768"]
+    volumes: [hf-cache:/data]
+    networks: {default: {aliases: [tei-embed]}}
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
+
+  # ------------------------------------------------------------------ observability profile
+  otel-collector:
+    profiles: ["observability"]
+    image: otel/opentelemetry-collector-contrib:0.115.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    env_file: .env
+    volumes: ["./deploy/otel-collector/config.yaml:/etc/otelcol/config.yaml:ro"]
+    ports: ["127.0.0.1:4317:4317", "127.0.0.1:4318:4318"]
+    depends_on: [api]
+
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:11.4.0
+    environment:
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: {clickhouse: {condition: service_healthy}}
+
+volumes:
+  pg-data:
+  redis-data:
+  ch-data:
+  minio-data:
+  hf-cache:
+  grafana-data:

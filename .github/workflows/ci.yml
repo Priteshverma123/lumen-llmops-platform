@@ -1,0 +1,54 @@
+# Supply-chain hygiene (lesson from the 2026 LiteLLM PyPI compromise): pin actions to full commit
+# SHAs (tag kept in the trailing comment), install from a lock file (uv sync --frozen), scan images,
+# publish an SBOM. Replace each <sha> with the commit SHA of the tagged release before enabling.
+name: ci
+on:
+  pull_request:
+  push: {branches: [main]}
+permissions: {contents: read}
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@<sha>  # v4.2.2
+      - uses: astral-sh/setup-uv@<sha>  # v5
+        with: {python-version: "3.12", enable-cache: true}
+      - run: uv sync --frozen
+      - run: uv run ruff check src tests sdk bench
+      - run: uv run ruff format --check src tests
+      - run: uv run mypy
+      - run: uv run pytest --cov=lumen --cov-report=term-missing
+      - name: A/A calibration (experiment statistics must stay calibrated)
+        run: uv run python bench/aa_simulation.py --runs 300 --looks 10 --per-look 50
+
+  image:
+    runs-on: ubuntu-24.04
+    needs: test
+    permissions: {contents: read, security-events: write}
+    steps:
+      - uses: actions/checkout@<sha>  # v4.2.2
+      - uses: docker/setup-buildx-action@<sha>  # v3
+      - uses: docker/build-push-action@<sha>  # v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          tags: lumen:ci
+          load: true
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: aquasecurity/trivy-action@<sha>  # 0.28.0
+        with: {image-ref: "lumen:ci", severity: "CRITICAL,HIGH", exit-code: "1", ignore-unfixed: true}
+      - uses: anchore/sbom-action@<sha>  # v0
+        with: {image: "lumen:ci", format: spdx-json, output-file: sbom.spdx.json}
+
+  compose-smoke:
+    runs-on: ubuntu-24.04
+    needs: image
+    steps:
+      - uses: actions/checkout@<sha>  # v4.2.2
+      - run: cp .env.example .env && docker compose up -d --wait --wait-timeout 600
+      - run: bash scripts/smoke.sh
+      - if: failure()
+        run: docker compose logs --tail=200

@@ -1,0 +1,235 @@
+{
+  "uid": "lumen-overview",
+  "title": "Lumen: LLM overview",
+  "tags": [
+    "lumen",
+    "llm"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Requests / min",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "lumen-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "lumen-clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT minute AS time, sum(calls) AS calls FROM llm_minute WHERE project_id = '${project}' AND $__timeFilter(minute) GROUP BY time ORDER BY time",
+          "format": 0,
+          "queryType": "timeseries"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Error rate",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "lumen-clickhouse"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "lumen-clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT minute AS time, sum(errors)/sum(calls) AS error_rate FROM llm_minute WHERE project_id = '${project}' AND $__timeFilter(minute) GROUP BY time ORDER BY time",
+          "format": 0,
+          "queryType": "timeseries"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Latency p50/p95/p99 (ms)",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "lumen-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "lumen-clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT minute AS time,\n        quantilesTDigestMerge(0.5,0.95,0.99)(latency)[1] AS p50, quantilesTDigestMerge(0.5,0.95,0.99)(latency)[2] AS p95,\n        quantilesTDigestMerge(0.5,0.95,0.99)(latency)[3] AS p99 FROM llm_minute WHERE project_id = '${project}' AND $__timeFilter(minute) GROUP BY time ORDER BY time",
+          "format": 0,
+          "queryType": "timeseries"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "TTFT p50/p95 (ms)",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "lumen-clickhouse"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "lumen-clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT minute AS time, quantilesTDigestMerge(0.5,0.95)(ttft)[1] AS p50,\n        quantilesTDigestMerge(0.5,0.95)(ttft)[2] AS p95 FROM llm_minute WHERE project_id = '${project}' AND $__timeFilter(minute) GROUP BY time ORDER BY time",
+          "format": 0,
+          "queryType": "timeseries"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Tokens / min",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "lumen-clickhouse"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "lumen-clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT minute AS time, sum(input_tokens) AS input, sum(output_tokens) AS output,\n        sum(cache_read_tokens) AS cache_read FROM llm_minute WHERE project_id = '${project}' AND $__timeFilter(minute) GROUP BY time ORDER BY time",
+          "format": 0,
+          "queryType": "timeseries"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Provider prompt-cache read ratio",
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "lumen-clickhouse"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "lumen-clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT minute AS time,\n        sum(cache_read_tokens)/greatest(1, sum(input_tokens)+sum(cache_read_tokens)) AS ratio FROM llm_minute WHERE project_id = '${project}' AND $__timeFilter(minute)\n        GROUP BY time ORDER BY time",
+          "format": 0,
+          "queryType": "timeseries"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "project",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "lumen-clickhouse"
+        },
+        "query": "SELECT DISTINCT project_id FROM llm_hour",
+        "refresh": 2
+      }
+    ]
+  }
+}

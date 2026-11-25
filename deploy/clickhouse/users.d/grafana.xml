@@ -1,0 +1,19 @@
+<clickhouse>
+    <!-- read-only user for dashboards (dev password: change it in production) -->
+    <users>
+        <grafana>
+            <password>grafana-readonly</password>
+            <profile>readonly_profile</profile>
+            <quota>default</quota>
+            <networks><ip>::/0</ip></networks>
+            <grants><query>GRANT SELECT ON lumen.*</query></grants>
+        </grafana>
+    </users>
+    <profiles>
+        <readonly_profile>
+            <readonly>1</readonly>
+            <max_execution_time>30</max_execution_time>
+            <max_memory_usage>2000000000</max_memory_usage>
+        </readonly_profile>
+    </profiles>
+</clickhouse>
